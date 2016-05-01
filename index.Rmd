@@ -6,25 +6,99 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
 ```
 
-## R Markdown
+## Background
+Human Activity Recognition - HAR - has emerged as a key research area in the last few years and is gaining increasing attention by the pervasive computing research community. Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, our goal is to use data from **accelerometers** on the _belt_, _forearm_, _arm_, and _dumbell_ of **6 participants**. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+### Reference(s)
+[Human Activity Recognition](http://groupware.les.inf.puc-rio.br/har). Refer the section on the Weight Lifting Exercise Dataset.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+## Overview
+The goal of your project is to predict the manner in which the participants did the exercise. This is the _"classe"_ variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
 
-```{r cars}
-summary(cars)
+### Data Sources
+* [Training Dataset](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+* [Test Dataset](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+## Importing Dataset into R
+```{r}
+# Download HAR training dataset only if needed.
+if (!file.exists("har_training_data.csv")) {
+  fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+  download.file(fileUrl, destfile = "har_training_data.csv", method = "curl")
+}
+# Download HAR test data only if needed
+if (!file.exists("har_test_data.csv")) {
+  fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+  download.file(fileUrl, destfile = "har_test_data.csv", method = "curl")
+}
+# ls the current working directory
+list.files("./")
+# Load the CSV files as dataframes
+training_data <- read.csv("har_training_data.csv", na.strings=c("NA","#DIV/0!",""))
+test_data <- read.csv("har_test_data.csv", na.strings=c("NA","#DIV/0!",""))
 ```
 
-## Including Plots
+## Pre-processing of Dataset
+Before going for dimensionality reduction using standard available techniques like PCA, identify the coloumns from dataset which needs to be removed because of null entries.
+### Cleaning
+```{r}
+# Count the NA's for each columns in the dataset
+na_count <- sapply(training_data, function(y) sum(is.na(y)))
+# Remove all those columns for which majority (60%) of the entries are NA's
+training_data <- training_data[!na_count > 0.6*nrow(training_data)]
+# Start the dataset with roll_belt measure onwards
+training_data <- subset(training_data, select = -c(1:7))
+```
+### Correlated Predictors
+Use findCorrelation function that searches through a correlation matrix and returns a vector of integers corresponding to columns to remove to reduce pair-wise correlations.
+```{r}
+library(caret); library(kernlab);
+corr_cols <- findCorrelation(cor(training_data[,-dim(training_data)[2]]), 
+                cutoff = 0.80, 
+                verbose = TRUE)
+```
+The analysis shows that the following columns are highly correlated to eacn other:
+```{r}
+names(training_data)[corr_cols]
+```
+Hence it would make sense to use PCA to reduce number of predictors and hence noise.
 
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+## Training Models and its Specification
+```{r}
+# Random Forest
+rf_model_fit <- train(classe ~ ., method="rf", preProcess="pca", data=training_data, trControl = trainControl(method = "cv"))
+print(rf_model_fit)
+# Boosted Logistic Regression
+logitboost_model_fit <- train(classe ~ ., method="LogitBoost", preProcess="pca", data=training_data, trControl = trainControl(method = "cv"))
+print(logitboost_model_fit)
+# Support Vector Machines with Linear Kernel
+svmLinear_model_fit <- train(classe ~ ., method="svmLinear", preProcess="pca", data=training_data, trControl = trainControl(method = "cv"))
+print(svmLinear_model_fit)
+# Dicision Tree
+rpart_model_fit <- train(classe ~ ., method="rpart", preProcess="pca", data=training_data, trControl = trainControl(method = "cv"))
+print(rpart_model_fit)
+library(rattle)
+fancyRpartPlot(rpart_model_fit$finalModel)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+## Prediction using the Trained Models
+```{r}
+# Random Forest
+cat("Random Forest Model Accuracy = ", rf_model_fit$results$Accuracy, "\n")
+predict(rf_model_fit, test_data)
+# Boosted Logistic Regression
+cat("Boosted Logistic Regression Model Accuracy = ", logitboost_model_fit$results$Accuracy, "\n")
+predict(logitboost_model_fit, test_data)
+# Support Vector Machines with Linear Kernel
+cat("Support Vector Machines with Linear Kernel Model Accuracy = ", svmLinear_model_fit$results$Accuracy, "\n")
+predict(svmLinear_model_fit, test_data)
+# Dicision Tree
+cat("Dicision Tree = ", rpart_model_fit$results$Accuracy, "\n")
+predict(rpart_model_fit, test_data)
+```
+## Conclusion / Remarks
+On the given training dataset, Random Forest relatively seems to have performed much better as compare to any of its couterparts (i.e. with 98% accuracy). The actual accuracy on the test data was 95% (approx.)
+With the other 2 algorithms i.e. Logistic Regression (Boost) and Decision Tree (rpart) some of the labels remain un-classified and has much less accuracy w.r.t. Random Forest (Refer model summary above).
